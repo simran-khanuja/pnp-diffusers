@@ -10,6 +10,7 @@ import yaml
 from tqdm import tqdm
 from transformers import logging
 from diffusers import DDIMScheduler, StableDiffusionPipeline
+import pandas as pd
 
 from pnp_utils import *
 
@@ -141,11 +142,34 @@ if __name__ == '__main__':
     opt = parser.parse_args()
     with open(opt.config_path, "r") as f:
         config = yaml.safe_load(f)
-    os.makedirs(config["output_path"], exist_ok=True)
-    with open(os.path.join(config["output_path"], "config.yaml"), "w") as f:
-        yaml.dump(config, f)
     
     seed_everything(config["seed"])
     print(config)
-    pnp = PNP(config)
-    pnp.run_pnp()
+    data = pd.read_csv(config["metadata_path"])
+    image_paths = data[config["image_path_col"]].tolist()
+    src_countries = data[config["country_col"]].tolist()
+    llm_edits = data[config["llm_edits_col"]].tolist()
+    output_path = config["output_path"]
+
+    for image_path, llm_edit, src_country in zip(image_paths, llm_edits, src_countries):
+        config["image_path"] = image_path
+        config["prompt"] = llm_edit
+        config["output_path"] = os.path.join(output_path, src_country + "_"+ os.path.splitext(os.path.basename(image_path))[0])
+
+        print(f'Running PnP on {image_path} for country {src_country}')
+        latents_path = os.path.join(config["latents_path"], src_country + "_"+ os.path.splitext(os.path.basename(image_path))[0])
+
+        if not os.path.exists(latents_path):
+            print(f'No latents found for {image_path} for country {src_country}')
+            continue
+
+        os.makedirs(config["output_path"], exist_ok=True)
+        with open(os.path.join(config["output_path"], "config.yaml"), "w") as f:
+            yaml.dump(config, f)
+
+        pnp = PNP(config)
+        try:
+            pnp.run_pnp()
+        except Exception as e:
+            print(f'Error in {image_path} for country {src_country}: {e}')
+            continue
