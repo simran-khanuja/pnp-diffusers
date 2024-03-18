@@ -13,6 +13,7 @@ import argparse
 from pathlib import Path
 from pnp_utils import *
 import torchvision.transforms as T
+import pandas as pd
 
 
 def get_timesteps(scheduler, num_inference_steps, strength, device):
@@ -184,26 +185,46 @@ def run(opt):
 
     seed_everything(opt.seed)
 
-    extraction_path_prefix = "_reverse" if opt.extract_reverse else "_forward"
-    save_path = os.path.join(opt.save_dir + extraction_path_prefix, os.path.splitext(os.path.basename(opt.data_path))[0])
-    os.makedirs(save_path, exist_ok=True)
-
     model = Preprocess(device, sd_version=opt.sd_version, hf_key=None)
-    recon_image = model.extract_latents(data_path=opt.data_path,
-                                         num_steps=opt.steps,
-                                         save_path=save_path,
-                                         timesteps_to_save=timesteps_to_save,
-                                         inversion_prompt=opt.inversion_prompt,
-                                         extract_reverse=opt.extract_reverse)
 
-    T.ToPILImage()(recon_image[0]).save(os.path.join(save_path, f'recon.jpg'))
+    extraction_path_prefix = "_reverse" if opt.extract_reverse else "_forward"
+
+    data = pd.read_csv(opt.metadata_path)
+    image_path_col = opt.image_path_col
+    caption_col = opt.caption_col
+    country_col = opt.country_col
+
+    image_paths = data[image_path_col].tolist()
+    captions = data[caption_col].tolist()
+    src_countries = data[country_col].tolist()
+
+    for image_path, caption, src_country in zip(image_paths, captions, src_countries):
+        save_path = os.path.join(opt.save_dir + extraction_path_prefix, src_country + "_" + os.path.splitext(os.path.basename(image_path))[0])
+        os.makedirs(save_path, exist_ok=True)
+
+        recon_image = model.extract_latents(data_path=image_path,
+                                            num_steps=opt.steps,
+                                            save_path=save_path,
+                                            timesteps_to_save=timesteps_to_save,
+                                            inversion_prompt=caption,
+                                            extract_reverse=opt.extract_reverse)
+
+        T.ToPILImage()(recon_image[0]).save(os.path.join(save_path, f'recon.jpg'))
+
+
 
 
 if __name__ == "__main__":
     device = 'cuda'
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_path', type=str,
-                        default='data/horse.jpg')
+    parser.add_argument('--metadata_path', type=str,
+                        default='./outputs/part1/caption-llm_edit/brazil/metadata.csv')
+    parser.add_argument('--image_path_col', type=str,
+                        default='src_image_path')
+    parser.add_argument('--country_col', type=str,
+                        default='src_country')
+    parser.add_argument('--caption_col', type=str,
+                        default='caption')
     parser.add_argument('--save_dir', type=str, default='latents')
     parser.add_argument('--sd_version', type=str, default='2.1', choices=['1.5', '2.0', '2.1'],
                         help="stable diffusion version")
